@@ -38,6 +38,7 @@ class TradingViewParser(Parser):
     support = None
     martingale = False
     current_turn = 0
+    placing_time = None
 
     user_menu_btn = (By.XPATH, '//button[contains(@aria-label, "Open user menu")]')
     sign_in_btn = (By.XPATH, '//button[contains(@data-name, "header-user-menu-sign-in")]')
@@ -114,7 +115,7 @@ class TradingViewParser(Parser):
         if cur < prev:
             return LOWERED
         
-    @ignore_if_fail(TypeError)
+    @execute_if_fail(TypeError, lambda: (None, None))
     @repeat_if_fail([NoSuchElementException, TypeError], 7)
     def refresh_support_and_resistance(self):
         items = self.driver.find_elements(By.CLASS_NAME, "item-_gbYDtbd")
@@ -192,7 +193,7 @@ class TradingViewParser(Parser):
             self.driver.find_element(*self.order_panel)
         except NoSuchElementException:
             self.press_shift_t()
-        self.wait(0.7)
+        self.wait(0.5)
         stop_btn = self.driver.find_element(*self.stop_btn)
         clicked = stop_btn.get_attribute("aria-selected")
         if not clicked:
@@ -216,6 +217,7 @@ class TradingViewParser(Parser):
         self.el_paste_text(take_profit_panel.find_elements(By.TAG_NAME, "input")[0], self.take_profit)
         self.el_paste_text(stop_loss_panel.find_elements(By.TAG_NAME, "input")[0], self.stop_loss)
         place_order_btn = self.driver.find_element(*self.place_order_btn)
+        self.logger.info(f"Order is prepared. Price: {price}, contracts: {self.contracts}")
         return place_order_btn
     
     @ignore_if_fail(StaleElementReferenceException)
@@ -230,7 +232,7 @@ class TradingViewParser(Parser):
         buy = True if resistance_diff else False
         place_order_btn = self.prepare_order(buy=buy)
         while True:
-            self.wait(0.3)
+            self.wait(0.5)
             disabled = place_order_btn.get_attribute('disabled')
             support_diff, resistance_diff = self.refresh_support_and_resistance()
             if disabled and (not support_diff and not resistance_diff):
@@ -247,7 +249,7 @@ class TradingViewParser(Parser):
     
     @ignore_if_fail(ValueError)
     @execute_if_fail(NoSuchElementException, lambda: (REJECTED, None, None, None))
-    @repeat_if_fail(NoSuchElementException, 3)
+    @repeat_if_fail((NoSuchElementException, ElementClickInterceptedException), 5)
     def check_order_status(self):
         status, type, units, side = None, None, None, None
         self.click_on_element(*self.orders_btn)
@@ -265,6 +267,10 @@ class TradingViewParser(Parser):
         for order in current_order:
             o_status = order.find_element(*self.order_status).text
             o_type = order.find_element(*self.order_type).text
+
+            if self.martingale and self.martingale_mode == "rigid":
+                if self.placing_time == placing_time:
+                    return REJECTED, None, None, order.find_element(*self.order_side).text
             if _(o_status) == _(FILLED) and (_(o_type) == _(STOP_LOSS) 
                                             or _(o_type) == _(TAKE_PROFIT)):
                 status, type = o_status, o_type
@@ -272,6 +278,7 @@ class TradingViewParser(Parser):
                 if _(o_type) == _(STOP_LOSS):
                     self.take_screenshot()
                     units, side = int(order.find_element(*self.order_units).text), order.find_element(*self.order_side).text
+                    self.placing_time = placing_time
                     self.activate_martingale()        
             elif _(o_status) == _(CANCELED) and len(current_order) < 3 and (_(o_type) == _(STOP_LOSS) 
                                                                             or _(o_type) == _(TAKE_PROFIT)):
@@ -282,6 +289,7 @@ class TradingViewParser(Parser):
                     if o_type == STOP_LOSS:
                         self.take_screenshot()
                         units, side = int(order.find_element(*self.order_units).text), order.find_element(*self.order_side).text 
+                        self.placing_time = placing_time
                         self.activate_martingale()     
         return status, type, units, side
             
@@ -334,7 +342,7 @@ class TradingViewParser(Parser):
         place_order_btn = self.prepare_order(buy=buy)
         self.logger.info(f"Maringale order is prepared. Current units is {self.contracts}.")
         while True:
-            self.wait(0.3)
+            self.wait(0.5)
             disabled = place_order_btn.get_attribute('disabled')
             if disabled:
                 self.logger.info("Waiting for martingale order to activate")
@@ -350,7 +358,7 @@ class TradingViewParser(Parser):
             self.contracts = units
         if self.martingale_mode == "rigid":
             while self.martingale:
-                self.wait(0.3)
+                self.wait(0.5)
                 incremented = self.increment_current_turn()
                 if not incremented:
                     return True

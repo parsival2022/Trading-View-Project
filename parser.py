@@ -67,7 +67,8 @@ class Parser:
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-webrtc")
         # options.add_experimental_option("prefs", {"profile.managed_default_content_settings.images": 2})
-        return webdriver.Chrome(service=Service(ChromeDriverManager(driver_version="128.0.6613.114").install()), options=options)
+        d_v = os.getenv("DRIVER_VERSION")
+        return webdriver.Chrome(service=Service(ChromeDriverManager(driver_version=d_v).install()), options=options)
    
     def wait(self, *args):
         try:
